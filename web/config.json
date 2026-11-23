@@ -1,0 +1,25 @@
+{
+  "stationIds": [
+    "08MH155",
+    "08MF005",
+    "01EJ001"
+  ],
+  "defaultStation": "08MH155",
+  "realtimeDays": 3,
+  "historicalYears": [
+    2024,
+    2023
+  ],
+  "pageSize": 3000,
+  "maxPages": 4,
+  "maxStations": 20,
+  "catalogueRefreshDays": 7,
+  "requestGapSeconds": 0.4,
+  "sources": {
+    "base": "https://api.weather.gc.ca",
+    "stations": "hydrometric-stations",
+    "realtime": "hydrometric-realtime",
+    "daily": "hydrometric-daily-mean"
+  },
+  "historicalRefreshDays": 30
+}

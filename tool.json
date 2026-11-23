@@ -1,16 +1,16 @@
 {
-  "id": "coolcode-tool-template",
-  "title": "CoolCode Tool Starter",
-  "description": "A browser-only example that trims lines and removes exact duplicates.",
-  "category": "security",
-  "tags": ["text", "lines", "duplicates"],
-  "icon": "scan-search",
-  "url": "/coolcode-tool-template/",
-  "source": "https://github.com/jsdyer/coolcode-tool-template",
+  "id": "riverpulse",
+  "title": "River Pulse",
+  "description": "Follow Canadian river gauges, compare seasonal water levels and discharge, and retain dated source receipts.",
+  "category": "places",
+  "tags": ["rivers", "hydrometric", "Canada", "ECCC", "water", "history"],
+  "icon": "map",
+  "url": "/riverpulse/",
+  "source": "https://github.com/jsdyer/riverpulse",
   "hosting": "project",
   "access": "browser",
   "data_info": {
-    "mode": "local",
-    "detail": "The browser reads the text you paste and compares its lines."
+    "mode": "mixed",
+    "detail": "Search ECCC's station catalogue, explore retained Canadian gauge observations, or fetch recent readings and historical daily means for any station."
   }
 }
