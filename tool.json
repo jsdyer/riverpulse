@@ -3,7 +3,14 @@
   "title": "River Pulse",
   "description": "Follow Canadian river gauges, compare seasonal water levels and discharge, and retain dated source receipts.",
   "category": "places",
-  "tags": ["rivers", "hydrometric", "Canada", "ECCC", "water", "history"],
+  "tags": [
+    "rivers",
+    "hydrometric",
+    "Canada",
+    "ECCC",
+    "water",
+    "history"
+  ],
   "icon": "map",
   "url": "/riverpulse/",
   "source": "https://github.com/jsdyer/riverpulse",
@@ -11,6 +18,7 @@
   "access": "browser",
   "data_info": {
     "mode": "mixed",
-    "detail": "Search ECCC's station catalogue, explore retained Canadian gauge observations, or fetch recent readings and historical daily means for any station."
+    "detail": "Search ECCC's station catalogue, explore retained Canadian gauge observations, or fetch recent readings and historical daily means for any station.",
+    "cadence": "Daily"
   }
 }
