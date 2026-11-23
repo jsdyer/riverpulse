@@ -24,7 +24,11 @@ def main():
         try:
             with sync_playwright() as p:
                 browser=p.chromium.launch();page=browser.new_page(viewport={'width':1440,'height':1050})
-                errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+                errors=[];dialogs=[];page.on('pageerror',lambda e:errors.append(str(e)))
+                def reject_dialog(dialog):
+                    dialogs.append(dialog.message)
+                    dialog.dismiss()
+                page.on('dialog',reject_dialog)
                 page.route('**/assets/tool-metrics.js',lambda r:r.fulfill(status=200,content_type='text/javascript',body=''))
                 page.goto(f'http://127.0.0.1:{server.server_port}/riverpulse/')
                 expect(page.locator('#station-title')).to_contain_text('Nicomekl')
@@ -60,8 +64,9 @@ def main():
                 # Imported markup is text, not HTML; malformed import does not erase data.
                 saved['stations'][0]['station']['name']='<img src=x onerror=alert(1)>'
                 page.locator('#import-json').set_input_files({'name':'receipt.json','mimeType':'application/json','buffer':json.dumps(saved).encode()})
-                expect(page.locator('#station-title')).to_contain_text('<Img')
+                expect(page.locator('#station-title')).to_contain_text('<img')
                 assert page.locator('#station-title img').count()==0
+                assert not dialogs,dialogs
                 page.locator('#import-json').set_input_files({'name':'invalid.json','mimeType':'application/json','buffer':b'{}'})
                 expect(page.locator('#status')).to_contain_text('Import failed')
                 # Restore public capture for screenshots.
@@ -73,6 +78,7 @@ def main():
                 assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
                 page.screenshot(path=str(screenshots/'mobile.png'),full_page=True)
                 assert not errors,errors
+                assert not dialogs,dialogs
                 browser.close()
             print('Browser checks passed: retained data, station search, charts, export/import, failed-request preservation, safe text and mobile layout')
         finally:server.shutdown()
