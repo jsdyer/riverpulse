@@ -61,6 +61,43 @@ def main():
                 page.locator('#fetch-button').click();expect(page.locator('#status')).to_contain_text('Source capture ready')
                 expect(page.locator('#station-title')).to_contain_text('Little Sackville')
                 expect(page.locator('#observation-rows tr')).to_have_count(1)
+                # Closed-gauge discovery distinguishes not-yet-loaded from missing data.
+                page.unroute('https://api.weather.gc.ca/**')
+                archive_calls=[]
+                def mock_closed_gauge(route):
+                    from urllib.parse import parse_qs, urlsplit
+                    query=parse_qs(urlsplit(route.request.url).query)
+                    station=query['STATION_NUMBER'][0]
+                    if 'filter' in query:
+                        archive_calls.append(route.request.url)
+                        dates=['1916-03-27'] if query['sortby'][0]=='DATE' else ['1917-01-13','1916-12-31']
+                        features=[{'properties':{'STATION_NUMBER':station,'DATE':d,'LEVEL':None,'DISCHARGE':5.8}} for d in dates]
+                        count=290
+                    elif 'hydrometric-realtime' in route.request.url:
+                        features=[];count=0
+                    else:
+                        year=query['datetime'][0][:4]
+                        date='1917-01-13' if year=='1917' else '1916-03-27'
+                        features=[{'properties':{'STATION_NUMBER':station,'DATE':date,'LEVEL':None,'DISCHARGE':5.8}}];count=1
+                    route.fulfill(status=200,content_type='application/json',body=json.dumps({'type':'FeatureCollection','numberMatched':count,'features':features}))
+                page.route('https://api.weather.gc.ca/**',mock_closed_gauge)
+                page.locator('#station-query').fill('01EG001');page.locator('.station-choice').click()
+                expect(page.locator('#history-chart')).to_contain_text('Not loaded yet')
+                expect(page.locator('#recent-chart')).not_to_contain_text('No recent values')
+                expect(page.locator('#archive-summary')).to_contain_text('discontinued')
+                expect(page.locator('#fetch-top')).to_be_visible()
+                page.locator('#archive-button').click()
+                expect(page.locator('#archive-summary')).to_contain_text('1916-03-27 to 1917-01-13')
+                page.locator('#archive-button').click()
+                expect(page.locator('#archive-summary')).to_contain_text('290 days')
+                assert len(archive_calls)==2
+                page.locator('#use-archive-years').click()
+                expect(page.locator('#year-a')).to_have_value('1917');expect(page.locator('#year-b')).to_have_value('1916')
+                expect(page.locator('#history-chart')).to_contain_text('Not loaded yet')
+                page.locator('#discharge-tab').click();page.locator('#fetch-top').click()
+                expect(page.locator('#status')).to_contain_text('Source capture ready')
+                expect(page.locator('#history-chart svg')).to_have_count(1)
+                expect(page.locator('#recent-chart')).to_contain_text('No recent values')
                 # Imported markup is text, not HTML; malformed import does not erase data.
                 saved['stations'][0]['station']['name']='<img src=x onerror=alert(1)>'
                 page.locator('#import-json').set_input_files({'name':'receipt.json','mimeType':'application/json','buffer':json.dumps(saved).encode()})

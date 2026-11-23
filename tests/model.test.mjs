@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {isStation,stationQuery,normalizeFeatures,sourceURL,validateReceipt,seriesSegments,seasonalX,revisions,toCSV,safeSource} from '../web/model.mjs';
-import {fetchSeries} from '../web/service.mjs';
+import {fetchSeries,fetchArchiveCoverage,createArchiveLookup} from '../web/service.mjs';
 const source=sourceURL('daily','01EJ001','2024-01-01/2024-12-31');
 const row=(at,level=1,discharge=2)=>({at,level,discharge,levelSymbol:null,dischargeSymbol:null});
 const receipt=(rows,capturedAt='2026-11-23T08:00:00Z')=>({schemaVersion:1,tool:'riverpulse',capturedAt,stations:[{station:{id:'01EJ001',name:'Sackville',province:'NS'},series:[{kind:'daily',label:'2024',source,observations:rows}]}]});
@@ -55,4 +55,31 @@ test('all genuine shipped captures validate and initial BC/NS history is populat
   const index=JSON.parse(fs.readFileSync(new URL('../web/data/index.json',import.meta.url)));
   for(const item of index.captures)validateReceipt(JSON.parse(fs.readFileSync(new URL('../web/data/'+item.file,import.meta.url))));
   const initial=JSON.parse(fs.readFileSync(new URL('../web/data/'+index.captures.at(-1).file,import.meta.url)));assert.ok(initial.stations.some(e=>e.station.province==='BC'));assert.ok(initial.stations.some(e=>e.station.province==='NS'));assert.ok(initial.stations.some(e=>e.series.some(s=>s.kind==='daily'&&s.observations.length>300)));
+});
+
+test('archive discovery uses non-null rows, bounded requests, actual represented years and per-station cache',async()=>{
+  const calls=[];
+  const fetcher=async url=>{
+    calls.push(url);const u=new URL(url);assert.equal(u.searchParams.get('STATION_NUMBER'),'01EG001');assert.match(u.searchParams.get('filter'),/IS NOT NULL/);
+    const dates=u.searchParams.get('sortby')==='DATE'?['1916-03-27']:['1917-01-13','1917-01-12','1916-12-31'];
+    return {type:'FeatureCollection',numberMatched:290,features:dates.map(d=>feature(d,0,'01EG001'))};
+  };
+  const lookup=createArchiveLookup(fetcher);const coverage=await lookup('01EG001');
+  assert.equal(coverage.firstDate,'1916-03-27');assert.equal(coverage.lastDate,'1917-01-13');assert.equal(coverage.count,290);assert.deepEqual(coverage.years,[1917,1916]);
+  assert.deepEqual(calls.map(u=>new URL(u).searchParams.get('limit')),['1','367']);assert.equal((await lookup('01EG001')).count,290);assert.equal(calls.length,2);
+  assert.ok(coverage.sources.every(s=>safeSource(s)));
+});
+test('archive discovery never invents intervening years, missing values or empty measured coverage',async()=>{
+  const payload=dates=>({type:'FeatureCollection',numberMatched:3,features:dates.map(d=>feature(d,2,'01EG001'))});
+  const c=await fetchArchiveCoverage('01EG001',null,async url=>new URL(url).searchParams.get('sortby')==='DATE'?payload(['1900-01-01']):payload(['2020-01-01','2017-12-31']));
+  assert.deepEqual(c.years,[2020,2017]);
+  let calls=0;const empty=await fetchArchiveCoverage('01EG001',null,async()=>{calls++;return {type:'FeatureCollection',numberMatched:0,features:[]};});
+  assert.equal(calls,1);assert.deepEqual(empty.years,[]);assert.equal(empty.firstDate,null);
+  await assert.rejects(()=>fetchArchiveCoverage('01EG001',null,async()=>({type:'FeatureCollection',numberMatched:1,features:[feature('1916-01-01',null,'01EG001')]})),/measured-value filter/);
+  await assert.rejects(()=>fetchArchiveCoverage('01EG001',null,async()=>({type:'FeatureCollection',numberMatched:4,features:[]})),/incomplete/);
+  await assert.rejects(()=>fetchArchiveCoverage('../bad',null,async()=>{}),/valid ECCC/);
+});
+test('failed archive discovery is not cached and can be retried',async()=>{
+  let calls=0;const lookup=createArchiveLookup(async()=>{calls++;if(calls===1)throw new Error('offline');return {type:'FeatureCollection',numberMatched:0,features:[]};});
+  await assert.rejects(()=>lookup('01EG001'),/offline/);assert.equal((await lookup('01EG001')).count,0);assert.equal(calls,2);
 });

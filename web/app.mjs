@@ -1,8 +1,9 @@
 import {stationQuery,pretty,finite,validateReceipt,latest,seriesSegments,revisions,toCSV,safeSource} from './model.mjs';
-import {getJSON,fetchReceipt} from './service.mjs';
+import {getJSON,fetchReceipt,createArchiveLookup} from './service.mjs?v=archive-dates-1';
 const $ = id => document.getElementById(id);
 const colours = ['#2f6d66','#b67b39','#6d69a6','#ac5860'];
-const state = {config:null,catalogue:null,index:null,receipt:null,selected:null,quantity:'discharge',shown:25,rows:100,memory:new Map(),controller:null,request:0};
+const state = {config:null,catalogue:null,index:null,receipt:null,selected:null,quantity:'discharge',shown:25,rows:100,memory:new Map(),controller:null,request:0,coverage:new Map(),archiveController:null,archiveRequest:0};
+const archiveLookup=createArchiveLookup();
 const text = (tag,value,cls) => {const el=document.createElement(tag);el.textContent=value;if(cls)el.className=cls;return el;};
 const titleCase = name => String(name).toLowerCase().replace(/(^|[\s(-])\p{L}/gu,c=>c.toUpperCase());
 const time = value => new Date(value).toLocaleString('en-CA',{timeZone:'UTC',dateStyle:'medium',timeStyle:'short'})+' UTC';
@@ -25,17 +26,18 @@ function renderStations(){
   $('more-stations').hidden=matches.length<=state.shown;
 }
 function selectStation(station){
-  state.controller?.abort();state.request++;setBusy(false);state.selected=station;state.rows=100;
+  state.controller?.abort();state.archiveController?.abort();state.archiveRequest++;state.request++;setBusy(false);state.selected=station;state.rows=100;
   renderStations();render();
-  status(currentEntry()?`Showing a retained capture for ${station.id}. Fetch to request another period.`:`${station.id} is selected. Fetch this station to load the chosen years and recent observations.`);
+  status(currentEntry()?`Showing a retained capture for ${station.id}. Fetch to request another period.`:`${station.id} is selected; observations have not been loaded. ${station.status==='Discontinued'?'This gauge is discontinued: find its archive dates to choose suitable years.':'Fetch this station to load the chosen periods.'}`);
 }
-function setBusy(busy){$('fetch-button').disabled=busy;$('cancel-button').hidden=!busy;}
+function setBusy(busy){$('fetch-button').disabled=busy;$('fetch-top').disabled=busy;$('cancel-button').hidden=!busy;}
 function svgElement(tag,attrs={},value){const el=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [key,v] of Object.entries(attrs))el.setAttribute(key,String(v));if(value!=null)el.textContent=value;return el;}
-function chart(container,series,kind){
+function chart(container,series,kind,loaded=true){
   const quantity=state.quantity;
   const chunks=series.map((s,i)=>({series:s,colour:colours[i%colours.length],segments:seriesSegments(s.observations,quantity,kind)}));
   const points=chunks.flatMap(c=>c.segments.flat());
   container.replaceChildren();
+  if(!loaded){container.append(text('p','Not loaded yet. Fetch this station, or find its archive dates above to choose suitable years.','empty'));return;}
   if(!points.length){container.append(text('p',kind==='daily'?'No archived values for this measurement in the selected years. Choose earlier years or another measurement.':'No recent values for this measurement in the captured period. Historical records may still be available.','empty'));return;}
   const width=850,height=265,left=60,right=18,top=18,bottom=40,plotW=width-left-right,plotH=height-top-bottom;
   const minX=kind==='daily'?Date.UTC(2000,0,1):points.reduce((v,p)=>Math.min(v,p.x),Infinity);
@@ -57,21 +59,47 @@ function render(){
   $('station-title').textContent=titleCase(station.name);
   $('station-location').textContent=Array.isArray(station.coordinates)?`${Math.abs(station.coordinates[1]).toFixed(4)}° ${station.coordinates[1]>=0?'N':'S'}, ${Math.abs(station.coordinates[0]).toFixed(4)}° ${station.coordinates[0]>=0?'E':'W'} · ${station.contributor||'ECCC hydrometric network'}`:station.contributor||'ECCC hydrometric network';
   $('official').href=`https://wateroffice.ec.gc.ca/report/${station.realtime?'real_time':'historical'}_e.html?stn=${station.id}`;
-  $('capture-label').textContent=entry?`Captured ${time(state.receipt.capturedAt)} · ${entry.series.reduce((n,s)=>n+s.observations.length,0).toLocaleString()} source records`:'No capture loaded for this station';
+  $('capture-label').textContent=entry?`Captured ${time(state.receipt.capturedAt)} · ${entry.series.reduce((n,s)=>n+s.observations.length,0).toLocaleString()} source records`:'Not loaded yet — fetch observations for this station';
   $('save-json').disabled=!entry;$('save-csv').disabled=!entry;
   const recent=entry?.series.find(s=>s.kind==='realtime');const history=entry?.series.filter(s=>s.kind==='daily')||[];
   metric('latest-level','level-date',recent,'level','m');metric('latest-discharge','discharge-date',recent,'discharge','m³/s');
   $('datum-note').textContent=`Datum: ${station.datum||'not supplied'}. Levels belong to this gauge.`;
-  chart($('recent-chart'),recent?[recent]:[],'realtime');chart($('history-chart'),history,'daily');
+  chart($('recent-chart'),recent?[recent]:[],'realtime',Boolean(entry));chart($('history-chart'),history,'daily',Boolean(entry));
+  if(!entry){$('level-date').textContent='Not loaded yet';$('discharge-date').textContent='Not loaded yet';}
   const count=recent?.observations.filter(p=>finite(p[state.quantity])).length||0;
-  $('recent-summary').textContent=count?`${count.toLocaleString()} ${state.quantity==='level'?'water-level':'discharge'} readings · time axis in UTC. Breaks indicate missing values or intervals longer than 2 hours. These are unit readings, not daily averages.`:'No recent series to display. A closed station or a missing measurement can still have historical data.';
+  $('recent-summary').textContent=!entry?'Selecting a station searches the catalogue only. No observations have been requested for this station.':count?`${count.toLocaleString()} ${state.quantity==='level'?'water-level':'discharge'} readings · time axis in UTC. Breaks indicate missing values or intervals longer than 2 hours. These are unit readings, not daily averages.`:'No recent series to display. A closed station or a missing measurement can still have historical data.';
   $('history-legend').replaceChildren(...history.map((s,i)=>{const e=text('span',`${s.label} · ${s.observations.filter(p=>finite(p[state.quantity])).length} days`);e.style.setProperty('--colour',colours[i%colours.length]);return e;}));
   $('history-summary').textContent=history.length?`Calendar-day alignment · ${history.map(s=>s.label).join(' / ')}. A daily mean averages the source's unit values for that day. Gaps are not zero; no baseline or flood threshold is inferred.`:'Select years and fetch the station to compare archived daily means.';
   $('source-links').replaceChildren(...(entry?.series||[]).map(s=>{const a=text('a',`${s.kind==='realtime'?'Recent observations':`Daily means · ${s.label}`} · retrieved ${time(s.retrievedAt||state.receipt.capturedAt)} ↗`);a.href=safeSource(s.source);return a;}));
   const previousValue=$('table-series').value;$('table-series').replaceChildren(...(entry?.series||[]).map((s,i)=>option(String(i),s.kind==='daily'?`${s.label} · daily means`:'Recent · unit readings')));
   if([...$('table-series').options].some(o=>o.value===previousValue))$('table-series').value=previousValue;
-  renderTable();renderRevision();
+  renderTable();renderRevision();renderCoverage();updatePeriods();
 }
+function updatePeriods(){
+  $('chosen-periods').textContent=`Past ${$('recent-days').value} days · years ${$('year-a').value} / ${$('year-b').value}`;
+}
+function renderCoverage(){
+  const info=state.coverage.get(state.selected?.id);$('archive-button').disabled=false;$('use-archive-years').hidden=!info?.years.length;$('archive-sources').replaceChildren();
+  if(!info){$('archive-summary').textContent=state.selected?.status==='Discontinued'?'This station is discontinued. Find its archive dates before choosing comparison years; the default years may be outside its record.':'Archive dates have not been checked. Find the source’s earliest and latest measured dates, then choose comparison years.';return;}
+  $('archive-summary').textContent=info.count?`${info.count.toLocaleString()} days with at least one reported measurement · ${info.firstDate} to ${info.lastDate}. Gaps may occur; this does not mean both measurements exist on every day.`:'ECCC returned no daily archive rows with a reported water level or discharge. This is separate from recent-data availability.';
+  if(info.years.length)$('use-archive-years').textContent=`Use available years: ${info.years.join(' & ')}`;
+  $('archive-sources').append(...info.sources.map((url,i)=>{const a=text('a',i?'Latest measured dates ↗':'Earliest measured date ↗');a.href=url;return a;}));
+  $('archive-sources').append(text('span',`Checked ${time(info.checkedAt)} · cached in this tab`));
+}
+$('archive-button').addEventListener('click',async()=>{
+  if(!state.selected)return;state.archiveController?.abort();const controller=new AbortController();state.archiveController=controller;const stationId=state.selected.id,request=++state.archiveRequest;
+  $('archive-button').disabled=true;$('archive-summary').textContent='Checking ECCC’s measured archive dates…';
+  const timeout=setTimeout(()=>controller.abort(),90000);
+  try{const info=await archiveLookup(stationId,controller.signal);if(request!==state.archiveRequest||state.selected.id!==stationId)return;state.coverage.set(stationId,info);renderCoverage();}
+  catch(error){if(request===state.archiveRequest&&state.selected.id===stationId)$('archive-summary').textContent=error.name==='AbortError'?'Archive date request timed out or was cancelled. The displayed observations are unchanged.':`Could not check archive dates: ${error.message} The displayed observations are unchanged.`;}
+  finally{clearTimeout(timeout);if(request===state.archiveRequest)$('archive-button').disabled=false;}
+});
+$('use-archive-years').addEventListener('click',()=>{
+  const years=state.coverage.get(state.selected?.id)?.years;if(!years?.length)return;
+  $('year-a').value=years[0];$('year-b').value=years[1]??years[0];updatePeriods();
+  status(`Comparison years set to ${years.join(' and ')} from measured source records. Select Fetch this station to load them.`);
+});
+for(const id of ['recent-days','year-a','year-b'])$(id).addEventListener('input',updatePeriods);
 function renderTable(){
   const series=currentEntry()?.series[Number($('table-series').value)||0];const rows=[...(series?.observations||[])].reverse();
   $('observation-rows').replaceChildren(...rows.slice(0,state.rows).map(p=>{const tr=document.createElement('tr');const symbols=[p.levelSymbol?`Level: ${p.levelSymbol}`:'',p.dischargeSymbol?`Flow: ${p.dischargeSymbol}`:''].filter(Boolean).join('; ')||'None supplied';tr.append(text('td',series.kind==='daily'?p.at:time(p.at)),text('td',pretty(p.level)),text('td',pretty(p.discharge)),text('td',symbols));return tr;}));
