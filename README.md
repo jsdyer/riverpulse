@@ -89,3 +89,11 @@ This app retrieves bounded periods for a selected set of stations and caches his
 ## Privacy and external requests
 
 A station search reads the shipped catalogue locally. Fetching readings or checking archive dates sends station IDs, date ranges and the browser's ordinary connection information to ECCC. No account, key, precise visitor position or uploaded file is sent. Imported JSON is processed only in the current tab and is labelled unverified; exports include source queries. The app does not save form values or receipts in browser storage. CoolCode's shared visit counter may run on published pages; it is independent of receipt contents. External source links open the official sites only when selected.
+
+<!-- schedule-reliability -->
+## Schedule reliability
+
+Public GitHub repositories can have scheduled workflows disabled after 60 days of inactivity. A separate weekly [schedule guard](.github/workflows/schedule-guard.yml) calls GitHub's enable-workflow API for an explicit list of refresh workflows and itself. It can restore workflows disabled for inactivity, preserves manually disabled workflows, and runs independently of collection failures.
+
+This is an interim mitigation, not a scheduling guarantee: GitHub does not document active-workflow renewal as a permanent exemption, and scheduled runs can be delayed or dropped. A scheduler on our own Linux server is the planned independent trigger. The guard does not collect data, create dummy commits, or change source/check timestamps; successful collection and published data freshness still need monitoring.
+<!-- /schedule-reliability -->
